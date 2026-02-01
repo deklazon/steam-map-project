@@ -12,7 +12,15 @@ app = FastAPI(
 # --- Кэширование данных ---
 # Загружаем данные один раз при старте приложения, чтобы не читать файл при каждом запросе
 try:
-    games_data = pd.read_parquet(PARQUET_FILE)
+    # --- Оптимизация памяти ---
+    # Определяем только те колонки, которые реально нужны приложению.
+    # Это значительно снижает потребление памяти на бесплатных тарифах хостинга.
+    REQUIRED_COLUMNS = [
+        'x', 'y', 'title', 'tags', 'all_reviews_count',
+        'release_date', 'original_price', 'latest_review_date',
+        'latest_followers_recorded_at'
+    ]
+    games_data = pd.read_parquet(PARQUET_FILE, columns=REQUIRED_COLUMNS)
     # Сразу обработаем NaN, чтобы не делать это при каждом запросе
     games_data = games_data.replace({pd.NA: None, float('nan'): None})
     # Конвертируем колонки с датами в строки
