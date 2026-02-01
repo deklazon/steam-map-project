@@ -15,50 +15,26 @@ st.set_page_config(
 # --- Константы ---
 # Запрашиваем большое количество игр, чтобы получить всю базу
 # API вернет столько, сколько есть, если их меньше
-API_BASE_URL = "https://steam-map-project.onrender.com/api/v1/games"
+API_URL = "https://steam-map-project.onrender.com/api/v1/games?limit=100000"
 
 # --- Подключение к данным ---
 @st.cache_data
 def load_data_from_api():
     """
-    Загружает все данные по играм из нашего API, используя пагинацию,
-    чтобы избежать таймаутов на больших объемах данных.
+    Загружает все данные по играм из нашего API.
     Кэширование не будет перезагружать данные при каждом действии пользователя.
     """
-    all_games = []
-    offset = 0
-    limit = 5000  # Загружаем по 5000 игр за раз
-    
-    with st.spinner("Загрузка данных об играх... Это может занять некоторое время."):
-        while True:
-            try:
-                # Формируем URL с пагинацией
-                paginated_url = f"{API_BASE_URL}?limit={limit}&offset={offset}"
-                
-                # Устанавливаем разумный таймаут для одного чанка
-                response = requests.get(paginated_url, timeout=60)
-                response.raise_for_status()
-                
-                data = response.json()
-                
-                # Если API вернул пустой список, значит, мы загрузили все данные
-                if not data:
-                    break
-                
-                all_games.extend(data)
-                offset += limit
-                
-            except requests.exceptions.RequestException as e:
-                st.error(f"Не удалось подключиться к API: {e}. Убедитесь, что FastAPI сервер запущен.")
-                return pd.DataFrame()
-
-    if not all_games:
+    try:
+        response = requests.get(API_URL)
+        response.raise_for_status()  # Проверка на ошибки HTTP (4xx или 5xx)
+        data = response.json()
+        df = pd.DataFrame(data)
+        # Убираем игры, для которых не удалось рассчитать координаты
+        df.dropna(subset=['x', 'y'], inplace=True)
+        return df
+    except requests.exceptions.RequestException as e:
+        st.error(f"Не удалось подключиться к API: {e}. Убедитесь, что FastAPI сервер запущен командой 'uvicorn app:app --reload'.")
         return pd.DataFrame()
-
-    df = pd.DataFrame(all_games)
-    # Убираем игры, для которых не удалось рассчитать координаты
-    df.dropna(subset=['x', 'y'], inplace=True)
-    return df
 
 # --- Основная часть приложения ---
 # Загрузка данных
