@@ -25,7 +25,9 @@ def load_data_from_api():
     Кэширование не будет перезагружать данные при каждом действии пользователя.
     """
     try:
-        response = requests.get(API_URL)
+        # Устанавливаем большой таймаут (в секундах), т.к. API на бесплатном тарифе может "просыпаться"
+        # и обрабатывать большой объем данных дольше стандартного времени ожидания.
+        response = requests.get(API_URL, timeout=300)
         response.raise_for_status()  # Проверка на ошибки HTTP (4xx или 5xx)
         data = response.json()
         df = pd.DataFrame(data)
