@@ -53,8 +53,13 @@ async def stream_games_from_db(db: Session, limit: int, offset: int):
         
         first = True
         for row in result:
+            if not row:
+                continue
+
             # Преобразуем каждую строку в словарь
             row_dict = dict(row._mapping)
+            if not row_dict:
+                continue
             
             # Заменяем Python-специфичные значения на JSON-совместимые
             for key, value in row_dict.items():
