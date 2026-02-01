@@ -41,21 +41,30 @@ def get_db():
 
 # --- Маршруты API (Endpoints) ---
 @app.get("/api/v1/games")
-def get_games(limit: int = 100000, offset: int = 0, db: Session = Depends(get_db)):
+def get_games(limit: int = None, offset: int = 0, db: Session = Depends(get_db)):
     """
     Возвращает список игр с пагинацией напрямую из базы данных.
+    Если limit не указан, возвращает все игры.
     - **limit**: Количество записей для возврата.
     - **offset**: Смещение (количество записей для пропуска).
     """
     try:
         # Формируем безопасный SQL-запрос с параметрами
         # Использование text() и параметров защищает от SQL-инъекций
-        query = text(f"SELECT * FROM {TABLE_NAME} LIMIT :limit OFFSET :offset")
+        if limit:
+            query = text(f"SELECT * FROM {TABLE_NAME} LIMIT :limit OFFSET :offset")
+            params = {'limit': limit, 'offset': offset}
+        else:
+            query = text(f"SELECT * FROM {TABLE_NAME} OFFSET :offset")
+            params = {'offset': offset}
         
         # Выполняем запрос и передаем параметры
         # pd.read_sql - удобный способ сразу получить результат в виде DataFrame
-        df = pd.read_sql(query, db.connection(), params={'limit': limit, 'offset': offset})
+        df = pd.read_sql(query, db.connection(), params=params)
         
+        # Заменяем NaN на None, так как JSON не поддерживает NaN
+        df = df.replace({pd.NA: None, float('nan'): None})
+
         # Конвертируем DataFrame в список словарей (JSON-совместимый формат)
         return df.to_dict(orient='records')
         

@@ -15,7 +15,7 @@ st.set_page_config(
 # --- Константы ---
 # Запрашиваем большое количество игр, чтобы получить всю базу
 # API вернет столько, сколько есть, если их меньше
-API_URL = "https://steam-map-project.onrender.com/api/v1/games?limit=100000"
+API_URL = "https://steam-map-project.onrender.com/api/v1/games"
 
 # --- Подключение к данным ---
 @st.cache_data
