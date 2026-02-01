@@ -15,30 +15,58 @@ st.set_page_config(
 # --- Константы ---
 # Запрашиваем большое количество игр, чтобы получить всю базу
 # API вернет столько, сколько есть, если их меньше
-API_URL = "https://steam-map-project.onrender.com/api/v1/games"
+API_BASE_URL = "https://steam-map-project.onrender.com/api/v1/games"
 
 # --- Подключение к данным ---
 @st.cache_data
-def load_data_from_api():
+def load_all_data_in_chunks():
     """
-    Загружает все данные по играм из нашего API.
-    Кэширование не будет перезагружать данные при каждом действии пользователя.
+    Загружает все данные с API по частям (пагинация), чтобы избежать таймаутов
+    при работе с большими объемами данных. Показывает прогресс-бар.
     """
-    try:
-        response = requests.get(API_URL)
-        response.raise_for_status()  # Проверка на ошибки HTTP (4xx или 5xx)
-        data = response.json()
-        df = pd.DataFrame(data)
-        # Убираем игры, для которых не удалось рассчитать координаты
-        df.dropna(subset=['x', 'y'], inplace=True)
-        return df
-    except requests.exceptions.RequestException as e:
-        st.error(f"Не удалось подключиться к API: {e}. Убедитесь, что FastAPI сервер запущен командой 'uvicorn app:app --reload'.")
-        return pd.DataFrame()
+    all_data = []
+    offset = 0
+    chunk_size = 10000  # Запрашиваем по 10 000 игр за раз
+
+    with st.spinner("Загрузка данных об играх... Это может занять некоторое время."):
+        progress_bar = st.progress(0, text="Начинаем загрузку...")
+        total_games_loaded = 0
+
+        while True:
+            try:
+                # Формируем URL с пагинацией
+                paginated_url = f"{API_BASE_URL}?limit={chunk_size}&offset={offset}"
+                response = requests.get(paginated_url, timeout=60) # Увеличиваем таймаут на всякий случай
+                response.raise_for_status()
+                
+                chunk = response.json()
+                
+                # Если API вернул пустой список, значит, мы загрузили все данные
+                if not chunk:
+                    progress_bar.progress(1.0, text="Загрузка завершена!")
+                    break
+                
+                all_data.extend(chunk)
+                total_games_loaded += len(chunk)
+                
+                # Обновляем прогресс-бар (это примерная оценка, т.к. мы не знаем общего числа)
+                # Просто показываем, что процесс идет
+                progress_bar.progress(min(1.0, (offset + chunk_size) / 150000), text=f"Загружено {total_games_loaded} игр...")
+
+                offset += chunk_size
+
+            except requests.exceptions.RequestException as e:
+                st.error(f"Не удалось подключиться к API: {e}. Убедитесь, что FastAPI сервер запущен.")
+                return pd.DataFrame()
+
+    df = pd.DataFrame(all_data)
+    # Убираем игры, для которых не удалось рассчитать координаты
+    df.dropna(subset=['x', 'y'], inplace=True)
+    return df
 
 # --- Основная часть приложения ---
 # Загрузка данных
-games_df = load_data_from_api()
+games_df = load_all_data_in_chunks()
 
 if not games_df.empty:
     st.sidebar.title("Фильтры")
