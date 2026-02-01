@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from starlette.responses import StreamingResponse
 import json
+import datetime
 
 # --- Настройки ---
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -63,7 +64,12 @@ async def stream_games_from_db(db: Session, limit: int, offset: int):
             if not first:
                 yield ','
             
-            yield json.dumps(row_dict)
+            # Используем кастомный обработчик для дат
+            def date_converter(o):
+                if isinstance(o, (datetime.date, datetime.datetime)):
+                    return o.isoformat()
+            
+            yield json.dumps(row_dict, default=date_converter)
             first = False
         
         # Завершаем JSON-массив
