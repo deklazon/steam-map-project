@@ -1,0 +1,10 @@
+pandas
+pyarrow
+scikit-learn
+umap-learn
+duckdb
+fastapi
+uvicorn
+streamlit
+plotly
+gunicorn
