@@ -7,6 +7,4 @@ fastapi
 uvicorn
 streamlit
 plotly
-gunicorn
-psycopg2-binary
-SQLAlchemy
+numpy
