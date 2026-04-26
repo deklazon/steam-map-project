@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+import datetime
+
 
 # --- Настройки страницы ---
 st.set_page_config(
@@ -43,6 +45,21 @@ if not games_df.empty:
     games_df.dropna(subset=['release_date'], inplace=True)
     
     # --- Фильтры ---
+    # 0 Фильтры бесполезного
+    zeo_review_count = games_df.query('all_reviews_count == 0').shape[0]
+    if zeo_review_count:
+        show_zero_review = st.sidebar.checkbox("Учитывать 0 отзывов", help=f"{zeo_review_count} игр", value=False)
+        if not show_zero_review:
+            games_df = games_df.query('all_reviews_count > 0')
+
+    late_release_count = games_df.query('release_date > datetime.datetime.now()').shape[0]
+    if late_release_count:
+        show_late_releases = st.sidebar.checkbox("Учитывать релизы после " + datetime.datetime.now().strftime("%Y-%m-%d"), help=f"{late_release_count} игр", value=False)
+        if not show_late_releases:
+            games_df = games_df.query('release_date <= datetime.datetime.now()')
+
+    st.sidebar.text(f"Всего игр: {games_df.shape[0]}")
+
     # 1. Фильтр по названию игры (для выделения)
     sorted_game_names = sorted(games_df['title'].unique())
     selected_game = st.sidebar.selectbox("Найти и выделить игру:", options=[""] + sorted_game_names, index=0)
@@ -72,12 +89,32 @@ if not games_df.empty:
         price_to = st.number_input("Цена до ($):", min_value=min_price, max_value=max_price, value=max_price)
 
     # 5. Фильтр по количеству отзывов
+    # 5.1 Выбор режима фильтрации
+    filter_mode_names = ["По кол-ву", "По % отзывов",]
+    review_filter_mode = st.sidebar.radio(
+        "Фильтр отзывов",
+        list(range(len(filter_mode_names))),
+        format_func=lambda v: {i: s for i, s in enumerate(filter_mode_names)}[v],
+        index = 0,
+        captions=[
+            "Точное количество отзывов",
+            "Например, топ 50% по отзывам",
+        ],
+    )
+
     min_reviews, max_reviews = int(games_df['all_reviews_count'].min()), int(games_df['all_reviews_count'].max())
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        reviews_from = st.number_input("Отзывов от:", min_value=min_reviews, max_value=max_reviews, value=min_reviews)
-    with col2:
-        reviews_to = st.number_input("Отзывов до:", min_value=min_reviews, max_value=max_reviews, value=max_reviews)
+    reviews_from = min_reviews
+    reviews_to = max_reviews
+    if review_filter_mode == 0:
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            reviews_from = st.number_input("Отзывов от:", min_value=min_reviews, max_value=max_reviews, value=500)
+        with col2:
+            reviews_to = st.number_input("Отзывов до:", min_value=min_reviews, max_value=max_reviews, value=max_reviews)
+    elif review_filter_mode == 1:
+        reviews_slider_percent = st.sidebar.slider("% отзывов", min_value=0.0, max_value=100.0, value=(90.0, 100.0))
+        reviews_from = games_df['all_reviews_count'].quantile(reviews_slider_percent[0] / 100)
+        reviews_to = games_df['all_reviews_count'].quantile(reviews_slider_percent[1] / 100)
 
     # --- Применение фильтров ---
     final_mask = pd.Series(True, index=games_df.index)
@@ -99,6 +136,9 @@ if not games_df.empty:
     # Применяем фильтр по отзывам
     reviews_mask = (games_df['all_reviews_count'] >= reviews_from) & (games_df['all_reviews_count'] <= reviews_to)
     final_mask &= reviews_mask
+
+    show_grey_filtered = st.sidebar.checkbox(f"Показывать серым не попавшие в фильтр ({final_mask.shape[0] - final_mask.sum()} точек)", help="Слишком много точек для отображения - тяжёлая операция", value=False)
+    st.sidebar.text(f"Активных точек графика: {final_mask.sum()}")
 
     # Определяем прозрачность на основе итоговой маски
     games_df['opacity'] = np.where(final_mask, 1.0, 0.03)
@@ -124,22 +164,23 @@ if not games_df.empty:
     fig = go.Figure()
 
     # 1. Добавляем фоновые точки (без hover-информации) с WebGL
-    fig.add_trace(go.Scattergl(
-        x=background_games['x'],
-        y=background_games['y'],
-        mode='markers',
-        marker=dict(
-            color=background_games['log_reviews'],
-            colorscale=px.colors.sequential.Viridis,
-            opacity=0.03,
-            size=background_games['size'],
-            cmin=games_df['log_reviews'].min(),
-            cmax=games_df['log_reviews'].max(),
-            showscale=False
-        ),
-        hoverinfo='none',
-        showlegend=False
-    ))
+    if show_grey_filtered:
+        fig.add_trace(go.Scattergl(
+            x=background_games['x'],
+            y=background_games['y'],
+            mode='markers',
+            marker=dict(
+                color=background_games['log_reviews'],
+                colorscale=px.colors.sequential.Viridis,
+                opacity=0.03,
+                size=background_games['size'],
+                cmin=games_df['log_reviews'].min(),
+                cmax=games_df['log_reviews'].max(),
+                showscale=False
+            ),
+            hoverinfo='none',
+            showlegend=False
+        ))
 
     # 2. Добавляем видимые точки (с hover-информацией) с WebGL для производительности
     fig.add_trace(go.Scattergl(
@@ -200,7 +241,7 @@ if not games_df.empty:
     """, unsafe_allow_html=True)
 
     # Отображение графика в Streamlit
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 else:
     st.warning("Не удалось загрузить данные для отображения карты.")
