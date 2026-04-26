@@ -1,100 +1,49 @@
-import os
-from fastapi import FastAPI, Depends
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
-from starlette.responses import StreamingResponse
-import json
-import datetime
+from fastapi import FastAPI
+import pandas as pd
 
-# --- Настройки ---
-DATABASE_URL = os.getenv("DATABASE_URL")
-TABLE_NAME = 'games'
-
-# --- Инициализация приложения и БД ---
+# --- Глобальные переменные ---
+PARQUET_FILE = 'games_with_coords.parquet'
 app = FastAPI(
     title="Steam Games API",
-    description="API для получения данных об играх из Steam (с использованием PostgreSQL и потоковой передачи).",
-    version="2.0.0"
+    description="API для получения данных об играх из Steam.",
+    version="0.1.0"
 )
 
-if not DATABASE_URL:
-    raise RuntimeError("Переменная окружения DATABASE_URL не установлена!")
+# --- Кэширование данных ---
+# Загружаем данные один раз при старте приложения, чтобы не читать файл при каждом запросе
+try:
+    games_data = pd.read_parquet(PARQUET_FILE)
+    # Сразу обработаем NaN, чтобы не делать это при каждом запросе
+    games_data = games_data.replace({pd.NA: None, float('nan'): None})
+    # Конвертируем колонки с датами в строки
+    for col in ['release_date', 'latest_review_date', 'latest_followers_recorded_at']:
+        if col in games_data.columns:
+            games_data[col] = games_data[col].astype(str)
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+except FileNotFoundError:
+    print(f"КРИТИЧЕСКАЯ ОШИБКА: Файл с данными '{PARQUET_FILE}' не найден. API не сможет возвращать данные.")
+    games_data = pd.DataFrame()
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# --- Потоковый генератор ---
-async def stream_games_from_db(db: Session, limit: int, offset: int):
-    """
-    Асинхронный генератор, который получает данные из БД порциями и отдает их
-    в виде JSON-строк. Это позволяет избежать загрузки всего результата в память.
-    """
-    if limit:
-        query = text(f"SELECT * FROM {TABLE_NAME} LIMIT :limit OFFSET :offset")
-        params = {'limit': limit, 'offset': offset}
-    else:
-        query = text(f"SELECT * FROM {TABLE_NAME} OFFSET :offset")
-        params = {'offset': offset}
-
-    # Используем with для гарантии закрытия соединения
-    with engine.connect() as connection:
-        # Выполняем запрос с потоковой передачей результатов
-        result = connection.execute(query, params)
-        
-        # Начинаем формирование JSON-массива
-        yield '['
-        
-        first = True
-        for row in result:
-            if not row:
-                continue
-
-            # Преобразуем каждую строку в словарь
-            row_dict = dict(row._mapping)
-            if not row_dict:
-                continue
-            
-            # Заменяем Python-специфичные значения на JSON-совместимые
-            for key, value in row_dict.items():
-                if value is None or (isinstance(value, float) and (value != value or value == float('inf') or value == float('-inf'))):
-                    row_dict[key] = None
-
-            if not first:
-                yield ','
-            
-            # Используем кастомный обработчик для дат
-            def date_converter(o):
-                if isinstance(o, (datetime.date, datetime.datetime)):
-                    return o.isoformat()
-            
-            yield json.dumps(row_dict, default=date_converter)
-            first = False
-        
-        # Завершаем JSON-массив
-        yield ']'
 
 # --- Маршруты API (Endpoints) ---
 @app.get("/api/v1/games")
-async def get_games_stream(limit: int = None, offset: int = 0, db: Session = Depends(get_db)):
+def get_games(limit: int = 10, offset: int = 0):
     """
-    Возвращает список игр в виде потокового JSON-ответа (streaming response).
-    Это позволяет обрабатывать большие объемы данных с минимальным использованием памяти.
+    Возвращает список игр с пагинацией.
+    - **limit**: Количество записей для возврата.
+    - **offset**: Смещение (количество записей для пропуска).
     """
-    return StreamingResponse(
-        stream_games_from_db(db, limit, offset),
-        media_type="application/json"
-    )
+    if games_data.empty:
+        return {"error": "Данные не загружены на сервере."}
+    
+    # Применяем пагинацию к загруженному DataFrame
+    paginated_df = games_data.iloc[offset : offset + limit]
+    
+    return paginated_df.to_dict(orient='records')
 
 @app.get("/")
 def read_root():
     """
     Корневой маршрут, который предоставляет базовую информацию об API.
     """
-    return {"message": "Добро пожаловать в Steam Games API (v2.0 - PostgreSQL Streaming). Используйте /docs для просмотра документации."}
+    return {"message": "Добро пожаловать в Steam Games API. Используйте /docs для просмотра документации."}
